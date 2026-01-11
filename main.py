@@ -15,9 +15,22 @@ load_dotenv()
 
 app = FastAPI(title="EmoTune API", version="1.0.0")
 
+# app.add_middleware(
+#     CORSMiddleware,
+#     allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:5173", "http://127.0.0.1:5173", "*"],
+#     allow_credentials=True,
+#     allow_methods=["*"],
+#     allow_headers=["*"],
+# )
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:5173", "http://127.0.0.1:5173", "*"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "https://your-app-name.vercel.app",  # Add your Vercel URL here after deployment
+        "*"  # Remove this in production for security
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -26,7 +39,11 @@ app.add_middleware(
 # ========== CONFIGURATION ==========
 SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID")
 SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET")
-SPOTIFY_REDIRECT_URI = "http://127.0.0.1:8000/spotify/callback"
+
+# SPOTIFY_REDIRECT_URI = "http://127.0.0.1:8000/spotify/callback"
+
+SPOTIFY_REDIRECT_URI = os.getenv("SPOTIFY_REDIRECT_URI", "http://127.0.0.1:8000/spotify/callback")
+
 
 # Model configuration
 MODEL_PATH = "./models/raf_db_model.h5"
@@ -416,5 +433,9 @@ async def health_check():
 async def root():
     return {"message": "EmoTune API is running"}
 
+# if __name__ == "__main__":
+#     uvicorn.run(app, host="127.0.0.1", port=8000)
+
 if __name__ == "__main__":
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
