@@ -1,11 +1,10 @@
 # emo_tune_api\requirements.txt
-
 fastapi==0.109.0
 uvicorn[standard]==0.27.0
 python-multipart==0.0.6
 python-dotenv==1.0.0
 opencv-python-headless==4.9.0.80
 numpy==1.24.3
-tensorFlow==2.10.1
+tensorflow==2.10.1
 requests==2.31.0
 Pillow==10.2.0
