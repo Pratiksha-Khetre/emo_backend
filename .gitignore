@@ -1,3 +1,5 @@
+# emo_tune_api\.gitignore
+
 # Python
 __pycache__/
 *.py[cod]
