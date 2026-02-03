@@ -5,20 +5,26 @@ import os
 import cv2
 import numpy as np
 import base64
-import tensorflow as tf
 import requests
 from urllib.parse import urlencode
 from dotenv import load_dotenv
 import uvicorn
 
+# Load environment variables
 load_dotenv()
 
+# Initialize FastAPI
 app = FastAPI(title="EmoTune API", version="1.0.0")
 
 # ========== CORS CONFIGURATION ==========
+ALLOWED_ORIGINS = os.getenv(
+    "ALLOWED_ORIGINS",
+    "https://emotune-nine.vercel.app,https://*.vercel.app,http://localhost:5173,http://localhost:3000"
+).split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure this properly in production
+    allow_origins=["*"],  # Change to ALLOWED_ORIGINS in production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -27,7 +33,7 @@ app.add_middleware(
 # ========== CONFIGURATION ==========
 SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID")
 SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET")
-SPOTIFY_REDIRECT_URI = os.getenv("SPOTIFY_REDIRECT_URI", "https://your-app.railway.app/spotify/callback")
+SPOTIFY_REDIRECT_URI = os.getenv("SPOTIFY_REDIRECT_URI")
 
 # Model configuration
 MODEL_PATH = os.getenv("MODEL_PATH", "./models/raf_db_model.h5")
@@ -39,42 +45,8 @@ CASCADE_PATH = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
 FACE_CASCADE = cv2.CascadeClassifier(CASCADE_PATH)
 
 spotify_tokens = {}
-
-# ========== LOAD MODEL ==========
 model = None
-
-def load_model():
-    """Load TensorFlow model with error handling"""
-    global model
-    
-    if not os.path.exists(MODEL_PATH):
-        print(f"⚠️  Model file not found at {MODEL_PATH}")
-        print(f"   Current directory: {os.getcwd()}")
-        print(f"   Directory contents: {os.listdir('.')}")
-        
-        # Try to download model if download script exists
-        if os.path.exists("download_model.py"):
-            print("   Attempting to download model...")
-            import download_model
-            if download_model.download_model():
-                print("   ✓ Model downloaded successfully")
-            else:
-                print("   ✗ Model download failed")
-                return False
-        else:
-            print("   ℹ️  Run download_model.py to fetch the model file")
-            return False
-    
-    try:
-        model = tf.keras.models.load_model(MODEL_PATH, compile=False)
-        print(f"✓ Model loaded successfully from {MODEL_PATH}")
-        return True
-    except Exception as e:
-        print(f"✗ Error loading model: {e}")
-        return False
-
-# Try to load model on startup
-load_model()
+model_loading_error = None
 
 # ========== EMOTION & LANGUAGE KEYWORDS ==========
 EMOTION_KEYWORDS = {
@@ -100,6 +72,121 @@ LANGUAGE_KEYWORDS = {
     "Malayalam": ["malayalam", "kerala", "malayalam songs", "malayalam music"],
 }
 
+# ========== LOAD MODEL (ASYNC) ==========
+def load_model_safe():
+    """Load model with comprehensive error handling"""
+    global model, model_loading_error
+    
+    try:
+        # Check if TensorFlow is available
+        try:
+            import tensorflow as tf
+            print(f"✓ TensorFlow {tf.__version__} loaded")
+        except ImportError as e:
+            model_loading_error = "TensorFlow not installed"
+            print(f"✗ TensorFlow import failed: {e}")
+            return False
+        
+        # Check if model file exists
+        if not os.path.exists(MODEL_PATH):
+            model_loading_error = f"Model file not found at {MODEL_PATH}"
+            print(f"✗ {model_loading_error}")
+            print(f"   Current directory: {os.getcwd()}")
+            print(f"   Directory contents: {os.listdir('.')}")
+            
+            if os.path.exists("models"):
+                print(f"   Models directory contents: {os.listdir('models')}")
+            
+            # Try to download model if script exists
+            if os.path.exists("download_model.py"):
+                print("   Attempting to download model...")
+                try:
+                    from download_model import download_model
+                    if download_model():
+                        print("   ✓ Model downloaded successfully")
+                    else:
+                        print("   ✗ Model download failed")
+                        return False
+                except Exception as e:
+                    print(f"   ✗ Error running download_model: {e}")
+                    return False
+            else:
+                return False
+        
+        # Try to load the model
+        model = tf.keras.models.load_model(MODEL_PATH, compile=False)
+        print(f"✓ Model loaded successfully from {MODEL_PATH}")
+        model_loading_error = None
+        return True
+        
+    except Exception as e:
+        model_loading_error = str(e)
+        print(f"✗ Error loading model: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+# ========== STARTUP EVENT ==========
+@app.on_event("startup")
+async def startup_event():
+    """Initialize on startup"""
+    print("\n" + "="*50)
+    print("🚀 EmoTune API Starting...")
+    print("="*50)
+    
+    # Print environment info
+    print(f"📍 Working directory: {os.getcwd()}")
+    print(f"🐍 Python version: {os.sys.version}")
+    print(f"📦 PORT: {os.getenv('PORT', '8000')}")
+    
+    # Check Spotify config
+    spotify_ok = bool(SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET)
+    print(f"🎵 Spotify configured: {spotify_ok}")
+    
+    if SPOTIFY_REDIRECT_URI:
+        print(f"   Redirect URI: {SPOTIFY_REDIRECT_URI}")
+    
+    # Try to load model (non-blocking)
+    print("\n📦 Loading model...")
+    model_ok = load_model_safe()
+    
+    if model_ok:
+        print("✅ Model loaded - emotion detection available")
+    else:
+        print("⚠️  Model not loaded - emotion detection unavailable")
+        print(f"   Error: {model_loading_error}")
+        print("   ℹ️  Music recommendations will still work!")
+    
+    print("\n" + "="*50)
+    print("✅ Server is ready!")
+    print("="*50 + "\n")
+
+# ========== HEALTH CHECK (ALWAYS WORKS) ==========
+@app.get("/")
+async def root():
+    """Root endpoint"""
+    return {
+        "message": "EmoTune API",
+        "status": "running",
+        "version": "1.0.0",
+    }
+
+@app.get("/health")
+async def health_check():
+    """Health check - always returns 200 even if model not loaded"""
+    return {
+        "status": "healthy",
+        "service": "emotune-api",
+        "model_loaded": model is not None,
+        "model_error": model_loading_error,
+        "spotify_configured": bool(SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET),
+        "features": {
+            "emotion_detection": model is not None,
+            "music_recommendations": True,
+            "spotify_integration": bool(SPOTIFY_CLIENT_ID)
+        }
+    }
+
 # ========== SPOTIFY FUNCTIONS ==========
 
 @app.get("/spotify/login")
@@ -107,6 +194,9 @@ async def spotify_login():
     """Generate Spotify OAuth URL"""
     if not SPOTIFY_CLIENT_ID:
         raise HTTPException(status_code=500, detail="Spotify not configured")
+    
+    if not SPOTIFY_REDIRECT_URI:
+        raise HTTPException(status_code=500, detail="SPOTIFY_REDIRECT_URI not set")
     
     params = {
         "client_id": SPOTIFY_CLIENT_ID,
@@ -272,7 +362,11 @@ def process_and_predict(image_file_bytes):
     if model is None:
         raise HTTPException(
             status_code=503,
-            detail="Model not loaded. Please contact administrator or try uploading the model file."
+            detail={
+                "error": "Model not available",
+                "message": model_loading_error or "Model not loaded",
+                "suggestion": "Please contact administrator or check deployment logs"
+            }
         )
     
     # Decode image
@@ -282,7 +376,7 @@ def process_and_predict(image_file_bytes):
     if img_bgr is None:
         raise HTTPException(status_code=400, detail="Invalid image format")
     
-    # Convert to grayscale for face detection
+    # Convert to grayscale
     img_gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
     
     # Detect faces
@@ -299,7 +393,7 @@ def process_and_predict(image_file_bytes):
     # Use largest face
     (x, y, w, h) = max(faces, key=lambda rect: rect[2] * rect[3])
     
-    # Extract and preprocess face
+    # Extract and preprocess
     face_roi = img_gray[y:y+h, x:x+w]
     face_resized = cv2.resize(face_roi, (IMG_WIDTH, IMG_HEIGHT))
     
@@ -384,55 +478,7 @@ async def get_recommendations(
         "returned_count": len(paginated_recommendations)
     }
 
-@app.get("/health")
-async def health_check():
-    """Health check endpoint"""
-    return {
-        "status": "healthy",
-        "model_loaded": model is not None,
-        "model_path": MODEL_PATH,
-        "spotify_configured": bool(SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET),
-        "python_version": os.sys.version,
-        "tensorflow_version": tf.__version__
-    }
-
-@app.get("/")
-async def root():
-    """Root endpoint"""
-    return {
-        "message": "EmoTune API",
-        "status": "running",
-        "version": "1.0.0",
-        "endpoints": {
-            "health": "/health",
-            "analyze": "/analyze_emotion/",
-            "recommendations": "/get_recommendations/",
-            "spotify_login": "/spotify/login"
-        }
-    }
-
-# ========== STARTUP & SHUTDOWN EVENTS ==========
-
-@app.on_event("startup")
-async def startup_event():
-    """Run on application startup"""
-    print("🚀 EmoTune API Starting...")
-    print(f"   Model loaded: {model is not None}")
-    print(f"   Spotify configured: {bool(SPOTIFY_CLIENT_ID)}")
-    print(f"   TensorFlow version: {tf.__version__}")
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Run on application shutdown"""
-    print("👋 EmoTune API Shutting down...")
-
 # ========== RUN ==========
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
-
-
-
-# >> git add .python-version runtime.txt render.yaml
-# >> git commit -m "Force Python 3.11.9 with .python-version file"
-# >> git push origin main
+    uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
