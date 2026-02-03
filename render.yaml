@@ -3,18 +3,12 @@
 services:
   - type: web
     name: emotune-api
-    env: python
+    env: docker
     plan: free
-    region: oregon
-    buildCommand: |
-      pip install --upgrade pip setuptools wheel
-      pip install -r requirements.txt
-    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    dockerfilePath: ./Dockerfile
     envVars:
       - key: SPOTIFY_CLIENT_ID
         sync: false
       - key: SPOTIFY_CLIENT_SECRET
         sync: false
-      - key: PYTHON_VERSION
-        value: 3.11.9
     healthCheckPath: /health
