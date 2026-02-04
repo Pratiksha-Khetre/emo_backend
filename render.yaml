@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: emotune-backend
+    runtime: python
+    plan: free
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: SPOTIFY_CLIENT_ID
+        sync: false
+      - key: SPOTIFY_CLIENT_SECRET
+        sync: false
+      - key: SPOTIFY_REDIRECT_URI
+        sync: false
+      - key: ALLOWED_ORIGINS
+        value: "*"
+      - key: MODEL_PATH
+        value: ./models/raf_db_model.h5
+    healthCheckPath: /health
