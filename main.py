@@ -74,56 +74,48 @@ LANGUAGE_KEYWORDS = {
 
 # ========== LOAD MODEL (ASYNC) ==========
 def load_model_safe():
-    """Load model with comprehensive error handling"""
     global model, model_loading_error
     
     try:
-        # Check if TensorFlow is available
-        try:
-            import tensorflow as tf
-            print(f"✓ TensorFlow {tf.__version__} loaded")
-        except ImportError as e:
-            model_loading_error = "TensorFlow not installed"
-            print(f"✗ TensorFlow import failed: {e}")
-            return False
-        
-        # Check if model file exists
-        if not os.path.exists(MODEL_PATH):
-            model_loading_error = f"Model file not found at {MODEL_PATH}"
-            print(f"✗ {model_loading_error}")
-            print(f"   Current directory: {os.getcwd()}")
-            print(f"   Directory contents: {os.listdir('.')}")
-            
-            if os.path.exists("models"):
-                print(f"   Models directory contents: {os.listdir('models')}")
-            
-            # Try to download model if script exists
-            if os.path.exists("download_model.py"):
-                print("   Attempting to download model...")
-                try:
-                    from download_model import download_model
-                    if download_model():
-                        print("   ✓ Model downloaded successfully")
-                    else:
-                        print("   ✗ Model download failed")
-                        return False
-                except Exception as e:
-                    print(f"   ✗ Error running download_model: {e}")
-                    return False
-            else:
-                return False
-        
-        # Try to load the model
+        import tensorflow as tf
+        print(f"✓ TensorFlow {tf.__version__} loaded")
+    except ImportError as e:
+        model_loading_error = "TensorFlow not installed"
+        print(f"✗ TensorFlow import failed: {e}")
+        return False
+
+    if not os.path.exists(MODEL_PATH):
+        model_loading_error = f"Model file not found at {MODEL_PATH}"
+        print(f"✗ {model_loading_error}")
+        return False
+
+    try:
+        # Primary attempt
         model = tf.keras.models.load_model(MODEL_PATH, compile=False)
         print(f"✓ Model loaded successfully from {MODEL_PATH}")
         model_loading_error = None
         return True
-        
+
+    except TypeError as e:
+        # Keras version mismatch — try rebuilding from weights only
+        print(f"⚠️  Standard load failed ({e}), trying custom_object_scope fallback...")
+        try:
+            from tensorflow.keras.layers import InputLayer
+            from tensorflow.keras.utils import custom_object_scope
+
+            with custom_object_scope({'InputLayer': InputLayer}):
+                model = tf.keras.models.load_model(MODEL_PATH, compile=False)
+            print(f"✓ Model loaded via custom_object_scope")
+            model_loading_error = None
+            return True
+        except Exception as e2:
+            model_loading_error = str(e2)
+            print(f"✗ Fallback also failed: {e2}")
+            return False
+
     except Exception as e:
         model_loading_error = str(e)
         print(f"✗ Error loading model: {e}")
-        import traceback
-        traceback.print_exc()
         return False
 
 # ========== STARTUP EVENT ==========
